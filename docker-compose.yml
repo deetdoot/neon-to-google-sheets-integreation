@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  neon-sync:
+    build: .
+    container_name: neon-to-sheets-sync
+    restart: unless-stopped
+    command: ["python", "src/sync/continuous_sync.py"]
+    environment:
+      # Database Configuration
+      - PGHOST=${PGHOST}
+      - PGDATABASE=${PGDATABASE}
+      - PGUSER=${PGUSER}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSSLMODE=${PGSSLMODE:-require}
+      - PGCHANNELBINDING=${PGCHANNELBINDING:-require}
+      - TABLE_NAME=${TABLE_NAME}
+      
+      # Sync Configuration
+      - SYNC_INTERVAL_MINUTES=${SYNC_INTERVAL_MINUTES:-2}
+      
+      # Google OAuth Configuration
+      - CLIENT_ID=${CLIENT_ID}
+      - PROJECT_ID=${PROJECT_ID}
+      - AUTH_URI=${AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
+      - TOKEN_URI=${TOKEN_URI:-https://oauth2.googleapis.com/token}
+      - AUTH_PROVIDER_X509_CERT_URL=${AUTH_PROVIDER_X509_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+      - REDIRECT_URI=${REDIRECT_URI:-http://localhost}
+      
+      # Google Sheets Configuration
+      - SPREADSHEET_NAME=${SPREADSHEET_NAME}
+    
+    volumes:
+      # Mount for persistent OAuth tokens
+      - ./data:/app/data
+      # Mount .env file if you prefer file-based config
+      - ./.env:/app/.env:ro
+    
+    # Add labels for better container management
+    labels:
+      - "com.docker.compose.project=neon-to-sheets"
+      - "com.docker.compose.service=sync"
+      - "description=Neon PostgreSQL to Google Sheets sync service"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import psycopg2; import os; from dotenv import load_dotenv; load_dotenv(); psycopg2.connect(host=os.getenv('PGHOST'), database=os.getenv('PGDATABASE'), user=os.getenv('PGUSER'), password=os.getenv('PGPASSWORD')).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Optional: One-time sync service
+  neon-sync-once:
+    build: .
+    container_name: neon-to-sheets-sync-once
+    profiles: ["once"]  # Only start when explicitly requested
+    environment:
+      # Same environment variables as above
+      - PGHOST=${PGHOST}
+      - PGDATABASE=${PGDATABASE}
+      - PGUSER=${PGUSER}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSSLMODE=${PGSSLMODE:-require}
+      - PGCHANNELBINDING=${PGCHANNELBINDING:-require}
+      - TABLE_NAME=${TABLE_NAME}
+      - CLIENT_ID=${CLIENT_ID}
+      - PROJECT_ID=${PROJECT_ID}
+      - AUTH_URI=${AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
+      - TOKEN_URI=${TOKEN_URI:-https://oauth2.googleapis.com/token}
+      - AUTH_PROVIDER_X509_CERT_URL=${AUTH_PROVIDER_X509_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+      - REDIRECT_URI=${REDIRECT_URI:-http://localhost}
+      - SPREADSHEET_NAME=${SPREADSHEET_NAME}
+    
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    
+    command: ["python", "src/sync/one_time_sync.py"]
+    
+    labels:
+      - "com.docker.compose.project=neon-to-sheets"
+      - "com.docker.compose.service=sync-once"
+      - "description=One-time Neon PostgreSQL to Google Sheets sync"
+
+volumes:
+  # Named volume for persistent data
+  sync_data:
+    driver: local
